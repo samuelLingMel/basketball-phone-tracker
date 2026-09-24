@@ -1,0 +1,395 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Phone Tracker</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+    font-family: -apple-system, Helvetica, Arial, sans-serif; background: #f7f7f7; color: #111;
+  }
+  h1 { font-size: 1.2rem; margin: 0 0 10px; }
+  .card { background: #fff; border-radius: 10px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  label { display: block; font-size: .85rem; color: #555; margin-bottom: 3px; }
+  input[type=text], input[type=date], select {
+    width: 100%; padding: 8px; font-size: 1rem; border: 1px solid #ccc; border-radius: 6px; margin-bottom: 10px;
+  }
+  .roster-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #eee; }
+  .roster-row:last-child { border-bottom: none; }
+  .roster-row span { flex: 1; }
+  button { font-family: inherit; cursor: pointer; }
+  .primary { background: #2e7d32; color: #fff; border: none; border-radius: 8px; padding: 12px 18px; font-size: 1rem; font-weight: bold; width: 100%; }
+  .danger { background: #c62828; color: #fff; border: none; border-radius: 8px; padding: 8px 12px; font-size: .85rem; font-weight: bold; }
+  .plain { background: #eee; border: none; border-radius: 8px; padding: 8px 12px; font-size: .85rem; }
+  .add-row { display: flex; gap: 6px; margin-bottom: 8px; }
+  .add-row input { margin-bottom: 0; flex: 1; }
+  .player-card { background: #fff; border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
+  .player-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .player-head .name { font-weight: bold; font-size: 1.05rem; flex: 1; }
+  .player-head .totals { font-size: .8rem; color: #555; }
+  .player-head .pts { color: #2e7d32; font-weight: bold; margin-right: 6px; }
+  .stat-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .stat-btn-wrap { display: flex; flex-direction: column; align-items: center; width: 60px; }
+  .stat-btn { width: 56px; height: 56px; border-radius: 10px; border: none; background: #1565c0; color: #fff; font-size: 1.6rem; font-weight: bold; }
+  .stat-count { font-size: .85rem; margin: 2px 0; }
+  .stat-label { font-size: .65rem; color: #666; text-align: center; }
+  [hidden] { display: none !important; }
+  #trackScreen .topbar { display: flex; gap: 8px; margin-bottom: 10px; }
+  #trackScreen .topbar button { flex: 1; }
+  textarea { width: 100%; height: 90px; font-family: monospace; font-size: .75rem; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <h1>Phone Tracker</h1>
+  <div class="card">
+    <label>Username</label>
+    <input type="text" id="loginUser" autocapitalize="off" autocorrect="off">
+    <label>Password</label>
+    <input type="password" id="loginPass" autocapitalize="off" autocorrect="off">
+    <div id="loginError" style="color:#c62828; font-size:.85rem; margin-bottom:8px;"></div>
+    <button class="primary" onclick="doLogin()">Log In</button>
+  </div>
+</div>
+
+<div id="setupScreen" hidden>
+  <h1 id="setupTitle">Phone Tracker</h1>
+  <div class="card">
+    <label>Team</label>
+    <select id="teamSelect" onchange="onTeamChange()"></select>
+    <label>Date</label>
+    <input type="date" id="dateInput">
+    <label>Opponent</label>
+    <input type="text" id="opponentInput" placeholder="Opponent (optional)">
+  </div>
+  <div class="card">
+    <label>Who's playing today?</label>
+    <div id="rosterList"></div>
+    <div class="add-row" style="margin-top:8px;">
+      <input type="text" id="newPlayerInput" placeholder="Add player name">
+      <button class="plain" onclick="addSetupPlayer()">Add</button>
+    </div>
+  </div>
+  <button class="primary" onclick="startTracking()">Start Tracking</button>
+</div>
+
+<div id="trackScreen" hidden>
+  <div class="topbar">
+    <button class="plain" onclick="undoLast()">&#8617; Undo Last</button>
+    <button class="danger" onclick="showEmailScreen()">End Game</button>
+  </div>
+  <div class="add-row">
+    <input type="text" id="fillinInput" placeholder="Add fill-in mid-game">
+    <button class="plain" onclick="addFillin()">Add</button>
+  </div>
+  <div id="playersHolder"></div>
+</div>
+
+<div id="emailScreen" hidden>
+  <h1>Game Finished</h1>
+  <div class="card">
+    <p>Tap below to open your Mail app with the results pre-filled, then just hit Send.</p>
+    <button class="primary" onclick="sendEmail()">Email Me Results</button>
+  </div>
+  <div class="card">
+    <p>If Mail doesn't open, or the draft looks cut off, copy this instead and paste it into an email or note yourself:</p>
+    <button class="plain" onclick="copyJson()">Copy JSON to Clipboard</button>
+    <textarea id="jsonOut" readonly></textarea>
+  </div>
+  <button class="plain" style="width:100%" onclick="backToSetup()">&#8617; Back / New Game</button>
+</div>
+
+<script>
+const TEAMS = [{"id": 1, "name": "Basketball Team", "label": "Basketball Team (Autumn 2026, Tuesday)", "roster": [{"name": "Alex Mitreski", "is_regular": true}, {"name": "Jesse Reason", "is_regular": true}, {"name": "Lachlan Lee", "is_regular": true}, {"name": "Michael Chan", "is_regular": true}, {"name": "Michael Hu", "is_regular": true}, {"name": "Samuel Ling", "is_regular": true}]}, {"id": 2, "name": "Cobras", "label": "Cobras (Autumn 2026, Thursday)", "roster": [{"name": "Albert Lu", "is_regular": false}, {"name": "Alex Chugaev", "is_regular": true}, {"name": "Alex Mitreski", "is_regular": true}, {"name": "Andrew Camilleri", "is_regular": false}, {"name": "Jack Sheng", "is_regular": true}, {"name": "James Elms", "is_regular": true}, {"name": "Lachlan Lee", "is_regular": true}, {"name": "Samuel Ling", "is_regular": true}, {"name": "Stuart Crisp", "is_regular": true}]}, {"id": 3, "name": "Razorbacks", "label": "Razorbacks (Autumn 2026, Sunday)", "roster": [{"name": "James Elms", "is_regular": true}, {"name": "Kyle Butler", "is_regular": true}, {"name": "Lachlan Lee", "is_regular": true}, {"name": "Samuel Ling", "is_regular": true}, {"name": "Stuart Crisp", "is_regular": true}]}];             // [{id, name, label, roster: [{name, is_regular}]}]
+const STAT_TYPES = [["PTS2", "2PT Made", 2], ["MISS2", "2PT Miss", 0], ["PTS3", "3PT Made", 3], ["MISS3", "3PT Miss", 0], ["FT", "FT Made", 1], ["MISSFT", "FT Miss", 0], ["OREB", "Off. Rebound", 0], ["DREB", "Def. Rebound", 0], ["AST", "Assist", 0], ["STL", "Steal", 0], ["BLK", "Block", 0], ["TOV", "Turnover", 0], ["FOUL", "Foul", 0]];   // [[key, label, points], ...]
+const USER_EMAIL = "lingofthesam@gmail.com";
+const LOGIN_USERNAME = "coach";
+const LOGIN_PASSWORD = "Hoops2026!";
+const SHORT_LABEL = {"PTS2":"2PT","MISS2":"2PT✗","PTS3":"3PT","MISS3":"3PT✗","MISSFT":"FT✗"};
+
+let currentTeamIndex = 0;
+let currentRoster = [];   // working copy of TEAMS[currentTeamIndex].roster for this session
+let currentTeamId = null;
+let currentTeamName = "";
+let players = [];         // [{name, isRegular, stats: {key: count}}]
+let eventLog = [];        // [{playerIndex, key}] for global undo
+let clickTimers = {};     // "playerIndex:key" -> timeout id
+
+function todayIso() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+
+function populateTeamSelect() {
+  const select = document.getElementById("teamSelect");
+  select.innerHTML = "";
+  TEAMS.forEach(function(t, i) {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = t.label;
+    select.appendChild(opt);
+  });
+}
+
+function onTeamChange() {
+  currentTeamIndex = parseInt(document.getElementById("teamSelect").value, 10) || 0;
+  const team = TEAMS[currentTeamIndex];
+  currentRoster = team.roster.map(function(p){ return {name: p.name, is_regular: p.is_regular}; });
+  document.getElementById("setupTitle").textContent = team.name;
+  renderRosterList();
+}
+
+function renderRosterSetup() {
+  document.getElementById("dateInput").value = todayIso();
+  populateTeamSelect();
+  onTeamChange();
+}
+
+function renderRosterList() {
+  const holder = document.getElementById("rosterList");
+  holder.innerHTML = "";
+  currentRoster.forEach(function(p, i) {
+    const row = document.createElement("div");
+    row.className = "roster-row";
+    row.innerHTML = '<input type="checkbox" id="chk' + i + '" checked>' +
+      '<span>' + p.name + (p.is_regular ? "" : " (fill-in)") + '</span>';
+    holder.appendChild(row);
+  });
+}
+
+function addSetupPlayer() {
+  const input = document.getElementById("newPlayerInput");
+  const name = input.value.trim();
+  if (!name) return;
+  currentRoster.push({name: name, is_regular: false});
+  input.value = "";
+  renderRosterList();
+}
+
+function startTracking() {
+  const team = TEAMS[currentTeamIndex];
+  currentTeamId = team.id;
+  currentTeamName = team.name;
+  players = [];
+  currentRoster.forEach(function(p, i) {
+    const chk = document.getElementById("chk" + i);
+    if (chk && chk.checked) {
+      players.push({name: p.name, isRegular: p.is_regular, stats: {}, removed: false});
+    }
+  });
+  if (players.length === 0) { alert("Check at least one player."); return; }
+  document.getElementById("setupScreen").hidden = true;
+  document.getElementById("trackScreen").hidden = false;
+  renderTrackScreen();
+}
+
+function shortNames() {
+  const firstNames = players.map(function(p){ return p.name.trim().split(" ")[0]; });
+  const counts = {};
+  firstNames.forEach(function(fn){ counts[fn] = (counts[fn]||0) + 1; });
+  return players.map(function(p){
+    const parts = p.name.trim().split(" ");
+    const first = parts[0];
+    if (counts[first] > 1 && parts.length > 1) return first + " " + parts[1][0] + ".";
+    return first;
+  });
+}
+
+function playerTotals(p) {
+  const s = p.stats;
+  const fgm = (s.PTS2||0) + (s.PTS3||0);
+  const fga = fgm + (s.MISS2||0) + (s.MISS3||0);
+  const ftm = s.FT || 0;
+  const fta = ftm + (s.MISSFT||0);
+  const reb = (s.OREB||0) + (s.DREB||0);
+  let pts = 0;
+  STAT_TYPES.forEach(function(st){ pts += (s[st[0]]||0) * st[2]; });
+  return {fgm: fgm, fga: fga, ftm: ftm, fta: fta, reb: reb, pts: pts};
+}
+
+function renderTrackScreen() {
+  const holder = document.getElementById("playersHolder");
+  holder.innerHTML = "";
+  const names = shortNames();
+  players.forEach(function(p, i) {
+    if (p.removed) return;
+    const t = playerTotals(p);
+    const card = document.createElement("div");
+    card.className = "player-card";
+
+    const head = document.createElement("div");
+    head.className = "player-head";
+    head.innerHTML =
+      '<span class="name">' + names[i] + '</span>' +
+      '<span class="pts">' + t.pts + '</span>' +
+      '<span class="totals">' + t.fgm + '/' + t.fga + ' FG &nbsp; ' + t.ftm + '/' + t.fta + ' FT &nbsp; ' + t.reb + ' REB</span>';
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "danger";
+    removeBtn.textContent = "✕";
+    removeBtn.onclick = function(){ p.removed = true; renderTrackScreen(); };
+    head.appendChild(removeBtn);
+    card.appendChild(head);
+
+    const grid = document.createElement("div");
+    grid.className = "stat-grid";
+    STAT_TYPES.forEach(function(st) {
+      const key = st[0];
+      const wrap = document.createElement("div");
+      wrap.className = "stat-btn-wrap";
+      const countEl = document.createElement("div");
+      countEl.className = "stat-count";
+      countEl.textContent = p.stats[key] || 0;
+      const btn = document.createElement("button");
+      btn.className = "stat-btn";
+      btn.textContent = "+";
+      btn.onclick = function(){ onTap(i, key); };
+      const labelEl = document.createElement("div");
+      labelEl.className = "stat-label";
+      labelEl.textContent = SHORT_LABEL[key] || key;
+      wrap.appendChild(btn);
+      wrap.appendChild(countEl);
+      wrap.appendChild(labelEl);
+      grid.appendChild(wrap);
+    });
+    card.appendChild(grid);
+    holder.appendChild(card);
+  });
+}
+
+function onTap(playerIndex, key) {
+  const jobKey = playerIndex + ":" + key;
+  if (clickTimers[jobKey]) {
+    clearTimeout(clickTimers[jobKey]);
+    delete clickTimers[jobKey];
+    decrement(playerIndex, key);
+  } else {
+    clickTimers[jobKey] = setTimeout(function() {
+      delete clickTimers[jobKey];
+      increment(playerIndex, key);
+    }, 300);
+  }
+}
+
+function increment(playerIndex, key) {
+  const p = players[playerIndex];
+  p.stats[key] = (p.stats[key] || 0) + 1;
+  eventLog.push({playerIndex: playerIndex, key: key});
+  renderTrackScreen();
+}
+
+function decrement(playerIndex, key) {
+  const p = players[playerIndex];
+  if ((p.stats[key] || 0) > 0) p.stats[key] -= 1;
+  for (let j = eventLog.length - 1; j >= 0; j--) {
+    if (eventLog[j].playerIndex === playerIndex && eventLog[j].key === key) {
+      eventLog.splice(j, 1);
+      break;
+    }
+  }
+  renderTrackScreen();
+}
+
+function undoLast() {
+  const last = eventLog.pop();
+  if (!last) return;
+  const p = players[last.playerIndex];
+  if ((p.stats[last.key] || 0) > 0) p.stats[last.key] -= 1;
+  renderTrackScreen();
+}
+
+function addFillin() {
+  const input = document.getElementById("fillinInput");
+  const name = input.value.trim();
+  if (!name) return;
+  const existingIndex = players.findIndex(function(p){ return p.name === name; });
+  if (existingIndex !== -1) {
+    players[existingIndex].removed = false;
+  } else {
+    players.push({name: name, isRegular: false, stats: {}, removed: false});
+  }
+  input.value = "";
+  renderTrackScreen();
+}
+
+function buildResultJson() {
+  const out = {
+    schema_version: 1,
+    team_id: currentTeamId,
+    team_name: currentTeamName,
+    date: document.getElementById("dateInput").value || todayIso(),
+    opponent: document.getElementById("opponentInput").value.trim(),
+    players: []
+  };
+  players.forEach(function(p) {
+    const stats = {};
+    Object.keys(p.stats).forEach(function(k){ if (p.stats[k] > 0) stats[k] = p.stats[k]; });
+    out.players.push({name: p.name, is_regular: p.isRegular, stats: stats});
+  });
+  return out;
+}
+
+function showEmailScreen() {
+  document.getElementById("trackScreen").hidden = true;
+  document.getElementById("emailScreen").hidden = false;
+  document.getElementById("jsonOut").value = JSON.stringify(buildResultJson());
+}
+
+function sendEmail() {
+  const json = JSON.stringify(buildResultJson());
+  const subject = encodeURIComponent(currentTeamName + " game results - " + (document.getElementById("dateInput").value || todayIso()));
+  const body = encodeURIComponent(json);
+  window.location.href = "mailto:" + encodeURIComponent(USER_EMAIL) + "?subject=" + subject + "&body=" + body;
+}
+
+function copyJson() {
+  const ta = document.getElementById("jsonOut");
+  ta.select();
+  ta.setSelectionRange(0, 999999);
+  try {
+    document.execCommand("copy");
+    alert("Copied.");
+  } catch (e) {
+    alert("Couldn't copy automatically - select the text and copy manually.");
+  }
+}
+
+function backToSetup() {
+  document.getElementById("emailScreen").hidden = true;
+  document.getElementById("setupScreen").hidden = false;
+  players = [];
+  eventLog = [];
+  renderRosterSetup();
+}
+
+function doLogin() {
+  const user = document.getElementById("loginUser").value.trim();
+  const pass = document.getElementById("loginPass").value;
+  if (user === LOGIN_USERNAME && pass === LOGIN_PASSWORD) {
+    try { localStorage.setItem("loggedIn", "yes"); } catch (e) {}
+    document.getElementById("loginScreen").hidden = true;
+    document.getElementById("setupScreen").hidden = false;
+    renderRosterSetup();
+  } else {
+    document.getElementById("loginError").textContent = "Wrong username or password.";
+  }
+}
+
+function checkLogin() {
+  let alreadyIn = false;
+  try { alreadyIn = localStorage.getItem("loggedIn") === "yes"; } catch (e) {}
+  if (alreadyIn) {
+    document.getElementById("loginScreen").hidden = true;
+    document.getElementById("setupScreen").hidden = false;
+    renderRosterSetup();
+  }
+}
+
+checkLogin();
+</script>
+</body>
+</html>
